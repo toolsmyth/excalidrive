@@ -87,6 +87,12 @@ export function LoginScreen(props: {
           ))}
         </ul>
       </div>
+
+      <footer className="absolute bottom-4 left-0 z-10 flex w-full justify-center gap-4 text-xs text-muted-foreground">
+        <a href="./privacy.html" className="hover:text-foreground hover:underline">Privacy</a>
+        <a href="./terms.html" className="hover:text-foreground hover:underline">Terms</a>
+        <a href="https://github.com/toolsmyth/excalidrive" className="hover:text-foreground hover:underline">GitHub</a>
+      </footer>
     </div>
   );
 }
