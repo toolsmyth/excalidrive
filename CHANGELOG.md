@@ -3,6 +3,18 @@
 All notable changes to Excalidrive are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-11-26
+
+### Added
+- **Remembers where you left off.** Each drawing reopens at the same zoom level and scroll position.
+- **Remembers your tool.** The last tool you used (pencil, rectangle, text, ...) and its settings, like stroke width, colors, and font size, carry over to the next time you open a drawing.
+
+### Changed
+- **No more signing in every time.** Excalidrive now remembers your Google account on this device:
+  - Reopening within about an hour connects instantly, with no clicks.
+  - After that, the app opens straight to your files with a one-click "Continue as you@gmail.com" bar. Opening any file or folder also reconnects. Google's popup closes by itself, with no account picker.
+- Your Drive folder list shows instantly on open, even before reconnecting.
+
 ## [1.2.0] - 2026-11-25
 
 ### Added
@@ -38,6 +50,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Light and dark themes, plus a reconnect banner when the Google session expires.
 - Deployed to GitHub Pages automatically on every push to `main`.
 
+[1.3.0]: https://github.com/toolsmyth/excalidrive/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/toolsmyth/excalidrive/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/toolsmyth/excalidrive/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/toolsmyth/excalidrive/releases/tag/v1.0.0

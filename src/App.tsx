@@ -3,7 +3,7 @@ import { Loader2 } from "lucide-react";
 import { LoginScreen } from "@/components/login-screen";
 import { Workspace } from "@/components/workspace";
 import { useTheme } from "@/hooks/use-theme";
-import { getStoredToken, requestGoogleToken } from "@/lib/storage/google-auth";
+import { getRememberedAccount, getStoredToken, requestGoogleToken } from "@/lib/storage/google-auth";
 import { GoogleDriveProvider } from "@/lib/storage/google-drive";
 import { LocalProvider } from "@/lib/storage/local";
 import type { StorageProvider } from "@/lib/storage/types";
@@ -17,14 +17,18 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Restore the previous session (Google token from this tab, or local demo mode).
+  // Restore the previous session. A remembered Google account opens the workspace straight away,
+  // even if the token has expired (the workspace then offers a one-click "Continue").
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const mode = localStorage.getItem(MODE_KEY);
       const token = getStoredToken();
       try {
-        if (mode === "google" && token) {
+        const account = getRememberedAccount();
+        if (mode === "google" && account) {
+          setProvider(GoogleDriveProvider.restore(account, token));
+        } else if (mode === "google" && token) {
           const p = await GoogleDriveProvider.connect(token);
           if (!cancelled) setProvider(p);
         } else if (mode === "local") {

@@ -35,7 +35,7 @@ import { EMPTY_DRAWING, Editor, type SaveStatus } from "@/components/editor";
 import { FileTree, type TreeActions } from "@/components/file-tree";
 import { APP_VERSION, WhatsNewDialog, shouldAutoShowWhatsNew } from "@/components/whats-new";
 import { cn } from "@/lib/utils";
-import { requestGoogleToken } from "@/lib/storage/google-auth";
+import { loadGis, requestGoogleToken } from "@/lib/storage/google-auth";
 import { GoogleDriveProvider } from "@/lib/storage/google-drive";
 import { countLocalDrawings, syncLocalTo } from "@/lib/storage/local";
 import { AuthExpiredError, sortNodes, type FsNode, type NodeKind, type StorageProvider } from "@/lib/storage/types";
@@ -50,6 +50,17 @@ type DialogState =
   | null;
 
 const lastKey = (p: StorageProvider) => `excalidrive:last:${p.kind}`;
+const treeKey = (p: StorageProvider) => `excalidrive:tree-cache:${p.kind}:${p.rootId}`;
+
+/** Last known folder tree for Drive, so files show instantly on open (even before reconnecting). */
+function loadTreeCache(p: StorageProvider): Record<string, FsNode[] | undefined> {
+  if (p.kind !== "google") return {};
+  try {
+    return JSON.parse(localStorage.getItem(treeKey(p)) || "{}");
+  } catch {
+    return {};
+  }
+}
 
 export function Workspace({
   provider,
@@ -63,14 +74,16 @@ export function Workspace({
   onSignOut: () => void;
 }) {
   const root = provider.rootId;
-  const [children, setChildren] = useState<Record<string, FsNode[] | undefined>>({});
+  const [children, setChildren] = useState<Record<string, FsNode[] | undefined>>(() => loadTreeCache(provider));
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [active, setActive] = useState<FsNode | null>(null);
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [dialog, setDialog] = useState<DialogState>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [authExpired, setAuthExpired] = useState(false);
+  const isDrive = provider instanceof GoogleDriveProvider;
+  // Opened from a remembered account whose token has expired: show files, ask for one click.
+  const [authExpired, setAuthExpired] = useState(() => isDrive && !(provider as GoogleDriveProvider).hasValidToken());
   const [authEpoch, setAuthEpoch] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const toastTimer = useRef<number | undefined>(undefined);
@@ -123,7 +136,7 @@ export function Workspace({
 
   // Initial load + reopen last drawing.
   useEffect(() => {
-    void loadChildren(root);
+    if (!(provider instanceof GoogleDriveProvider) || provider.hasValidToken()) void loadChildren(root);
     try {
       const last = JSON.parse(localStorage.getItem(lastKey(provider)) || "null") as FsNode | null;
       if (last) setActive(last);
@@ -159,7 +172,8 @@ export function Workspace({
 
   // ---- actions ----
   const actions: TreeActions = {
-    toggle: (folder) => {
+    toggle: async (folder) => {
+      if (authExpired && !expanded.has(folder.id) && !children[folder.id] && !(await reconnect())) return;
       if (expanded.has(folder.id)) {
         setExpanded((s) => {
           const n = new Set(s);
@@ -168,7 +182,9 @@ export function Workspace({
         });
       } else expand(folder.id);
     },
-    open: (drawing) => {
+    open: async (drawing) => {
+      // Clicking a file is a user gesture, so it can quietly refresh the Google token first.
+      if (authExpired && !(await reconnect())) return;
       setActive(drawing);
       if (window.innerWidth < 768) setSidebarOpen(false);
     },
@@ -232,17 +248,39 @@ export function Workspace({
     }
   };
 
-  const reconnect = async () => {
-    if (!(provider instanceof GoogleDriveProvider)) return;
+  /** Refreshes the Google token using the browser's existing Google session (one click, no picker). */
+  const reconnect = async (): Promise<boolean> => {
+    if (!(provider instanceof GoogleDriveProvider)) return true;
     try {
-      provider.setToken(await requestGoogleToken());
+      provider.setToken(await requestGoogleToken({ prompt: "", hint: provider.user.email }));
       setAuthExpired(false);
       setAuthEpoch((n) => n + 1);
       void loadChildren(root);
+      for (const id of expanded) void loadChildren(id);
+      return true;
     } catch (e) {
       showError(e instanceof Error ? e.message : String(e));
+      return false;
     }
   };
+
+  // Load Google's sign-in script early so a reconnect click opens the popup instantly.
+  useEffect(() => {
+    if (isDrive) void loadGis().catch(() => {});
+  }, [isDrive]);
+
+  // Keep the Drive folder tree cached for instant display next time.
+  useEffect(() => {
+    if (provider.kind !== "google" || !children[root]) return;
+    const t = window.setTimeout(() => {
+      try {
+        localStorage.setItem(treeKey(provider), JSON.stringify(children));
+      } catch {
+        /* ignore */
+      }
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [children, provider, root]);
 
   // ---- breadcrumb ----
   const crumbs = useMemo(() => {
@@ -433,9 +471,11 @@ export function Workspace({
         {authExpired && (
           <div className="flex items-center gap-3 border-b bg-amber-500/10 px-4 py-2 text-sm">
             <CloudOff className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-            <span className="flex-1">Lost connection to Google Drive. Your changes are kept — reconnect to keep saving.</span>
-            <Button size="sm" onClick={reconnect}>
-              Reconnect
+            <span className="flex-1">
+              Reconnect Google Drive to open and save drawings. Your changes are kept.
+            </span>
+            <Button size="sm" onClick={() => void reconnect()}>
+              Continue as {provider.user.email ?? provider.user.name}
             </Button>
           </div>
         )}

@@ -1,4 +1,4 @@
-import { revokeGoogleToken, type GoogleToken } from "./google-auth";
+import { rememberAccount, revokeGoogleToken, type GoogleToken, type RememberedAccount } from "./google-auth";
 import {
   AuthExpiredError,
   DRAWING_EXT,
@@ -47,7 +47,24 @@ export class GoogleDriveProvider implements StorageProvider {
       photoUrl: about.user.photoLink,
     };
     const rootId = await tmp.findOrCreateRoot();
+    rememberAccount({ name: user.name, email: user.email!, photoUrl: user.photoUrl, rootId });
     return new GoogleDriveProvider(token, rootId, user);
+  }
+
+  /**
+   * Reopens a remembered account without any network calls, so the app can show the workspace
+   * immediately. With no valid token, Drive calls throw AuthExpiredError until setToken() is called.
+   */
+  static restore(account: RememberedAccount, token: GoogleToken | null): GoogleDriveProvider {
+    return new GoogleDriveProvider(token ?? { accessToken: "", expiresAt: 0 }, account.rootId, {
+      name: account.name,
+      email: account.email,
+      photoUrl: account.photoUrl,
+    });
+  }
+
+  hasValidToken() {
+    return Date.now() < this.token.expiresAt;
   }
 
   /** Swap in a fresh token after re-auth, keeping the same root. */

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Excalidraw, serializeAsJSON } from "@excalidraw/excalidraw";
-import type { ExcalidrawProps } from "@excalidraw/excalidraw/types";
+import type { ExcalidrawImperativeAPI, ExcalidrawProps } from "@excalidraw/excalidraw/types";
 import "@excalidraw/excalidraw/index.css";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { AuthExpiredError, type FsNode, type StorageProvider } from "@/lib/storage/types";
 import type { Theme } from "@/hooks/use-theme";
 import { SAVE_NOW_EVENT } from "@/hooks/use-save-delay";
+import { createPrefsRecorder, initialAppState } from "@/lib/view-prefs";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "unsaved" | "error";
 
@@ -54,31 +55,64 @@ export function Editor({ provider, node, theme, authEpoch, saveDelayMs, onStatus
   const timer = useRef<number | undefined>(undefined);
   const inFlight = useRef<Promise<void> | null>(null);
 
+  // Zoom/scroll for this drawing + last tool & style, remembered on this device.
+  const prefsKey = `${provider.kind}:${node.id}`;
+  const prefs = useRef(createPrefsRecorder(prefsKey));
+  const restoreTool = useRef<string | undefined>(undefined);
+
   // Keep callbacks fresh without re-creating flush.
   const cb = useRef({ onStatus, onAuthExpired, onError });
   cb.current = { onStatus, onAuthExpired, onError };
 
   // ---- load ----
   useEffect(() => {
+    if (lastSig.current !== null) return; // already loaded
     let cancelled = false;
+    setLoadError(null);
     provider
       .read(node.id)
       .then((text) => {
         if (cancelled) return;
         const data = text.trim() ? JSON.parse(text) : JSON.parse(EMPTY_DRAWING);
         lastSig.current = signature(data.elements ?? [], data.files, data.appState?.viewBackgroundColor);
-        setInitialData({ ...data, scrollToContent: true });
+        const saved = initialAppState(prefsKey);
+        restoreTool.current = saved.tool;
+        setInitialData({
+          ...data,
+          appState: { ...data.appState, ...saved.appState },
+          // Only auto-fit the drawing the first time; afterwards reopen where you left off.
+          scrollToContent: !saved.view,
+        });
         cb.current.onStatus("saved");
       })
       .catch((e) => {
         if (cancelled) return;
-        if (e instanceof AuthExpiredError) cb.current.onAuthExpired();
+        if (e instanceof AuthExpiredError) {
+          cb.current.onAuthExpired();
+          setLoadError("Reconnect Google Drive (button at the top) to open this drawing.");
+          return;
+        }
         setLoadError(e instanceof SyntaxError ? "This file isn't a valid Excalidraw drawing." : String(e?.message ?? e));
       });
     return () => {
       cancelled = true;
     };
-  }, [provider, node.id]);
+  }, [provider, node.id, prefsKey, authEpoch]); // authEpoch: retry after reconnecting
+
+  // Re-select the last used tool once the editor is ready.
+  const onApi = useCallback((api: ExcalidrawImperativeAPI) => {
+    const tool = restoreTool.current;
+    restoreTool.current = undefined;
+    if (tool && tool !== "selection") {
+      requestAnimationFrame(() => {
+        try {
+          api.setActiveTool({ type: tool } as Parameters<ExcalidrawImperativeAPI["setActiveTool"]>[0]);
+        } catch {
+          /* unknown tool in this Excalidraw version */
+        }
+      });
+    }
+  }, []);
 
   // ---- save ----
   const flush = useCallback(async () => {
@@ -111,6 +145,7 @@ export function Editor({ provider, node, theme, authEpoch, saveDelayMs, onStatus
   const onChange = useCallback<OnChange>(
     (elements, appState, files) => {
       if (lastSig.current === null) return; // not loaded yet
+      prefs.current.record(appState);
       const sig = signature(elements, files, appState.viewBackgroundColor);
       if (sig === lastSig.current) return;
       lastSig.current = sig;
@@ -125,6 +160,10 @@ export function Editor({ provider, node, theme, authEpoch, saveDelayMs, onStatus
 
   // Save immediately when switching files / unmounting.
   useEffect(() => () => void flush(), [flush]);
+  useEffect(() => {
+    const p = prefs.current;
+    return () => p.flush();
+  }, []);
 
   // Retry after re-auth.
   useEffect(() => {
@@ -148,9 +187,15 @@ export function Editor({ provider, node, theme, authEpoch, saveDelayMs, onStatus
     };
     // Installed apps and phones often never fire beforeunload, so also save when the app is hidden.
     const onHidden = () => {
-      if (document.visibilityState === "hidden") void flush();
+      if (document.visibilityState === "hidden") {
+        prefs.current.flush();
+        void flush();
+      }
     };
-    const onSaveNow = () => void flush();
+    const onSaveNow = () => {
+      prefs.current.flush();
+      void flush();
+    };
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("beforeunload", onBeforeUnload);
     document.addEventListener("visibilitychange", onHidden);
@@ -187,6 +232,7 @@ export function Editor({ provider, node, theme, authEpoch, saveDelayMs, onStatus
     <div className="h-full w-full">
       <Excalidraw
         initialData={initialData}
+        excalidrawAPI={onApi}
         onChange={onChange}
         theme={theme}
         name={node.name}
