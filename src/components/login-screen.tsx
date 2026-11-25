@@ -1,7 +1,10 @@
-import { FolderTree, HardDrive, Loader2, Lock, Moon, PenTool, Sun } from "lucide-react";
+import { Download, FolderTree, HardDrive, Loader2, Lock, Moon, PenTool, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getClientId } from "@/lib/storage/google-auth";
 import { LoginBackground } from "@/components/login-background";
+import { useState } from "react";
+import { APP_VERSION, WhatsNewDialog } from "@/components/whats-new";
+import { useInstallPrompt } from "@/hooks/use-install-prompt";
 import type { Theme } from "@/hooks/use-theme";
 
 function GoogleIcon() {
@@ -30,12 +33,21 @@ export function LoginScreen(props: {
   onLocal: () => void;
 }) {
   const hasClientId = !!getClientId();
+  const install = useInstallPrompt();
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   return (
     <div className="dot-grid relative flex min-h-full items-center justify-center overflow-hidden bg-background p-6">
       <LoginBackground />
-      <Button variant="ghost" size="icon" className="absolute top-4 right-4 z-10" onClick={props.onToggleTheme} aria-label="Toggle theme">
-        {props.theme === "dark" ? <Sun /> : <Moon />}
-      </Button>
+      <div className="absolute top-4 right-4 z-10 flex items-center gap-1">
+        {install.canInstall && (
+          <Button variant="outline" size="sm" onClick={install.install}>
+            <Download /> Install app
+          </Button>
+        )}
+        <Button variant="ghost" size="icon" onClick={props.onToggleTheme} aria-label="Toggle theme">
+          {props.theme === "dark" ? <Sun /> : <Moon />}
+        </Button>
+      </div>
 
       <div className="relative z-10 w-full max-w-sm overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-xl">
         <div className="p-6 pb-5">
@@ -92,7 +104,11 @@ export function LoginScreen(props: {
         <a href="./privacy.html" className="hover:text-foreground hover:underline">Privacy</a>
         <a href="./terms.html" className="hover:text-foreground hover:underline">Terms</a>
         <a href="https://github.com/toolsmyth/excalidrive" className="hover:text-foreground hover:underline">GitHub</a>
+        <button onClick={() => setWhatsNewOpen(true)} className="cursor-pointer hover:text-foreground hover:underline">
+          What's new · v{APP_VERSION}
+        </button>
       </footer>
+      <WhatsNewDialog open={whatsNewOpen} onOpenChange={setWhatsNewOpen} />
     </div>
   );
 }

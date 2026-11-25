@@ -5,6 +5,7 @@ import "@excalidraw/excalidraw/index.css";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { AuthExpiredError, type FsNode, type StorageProvider } from "@/lib/storage/types";
 import type { Theme } from "@/hooks/use-theme";
+import { SAVE_NOW_EVENT } from "@/hooks/use-save-delay";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "unsaved" | "error";
 
@@ -12,8 +13,6 @@ type OnChange = NonNullable<ExcalidrawProps["onChange"]>;
 type Elements = Parameters<OnChange>[0];
 type AppState = Parameters<OnChange>[1];
 type Files = Parameters<OnChange>[2];
-
-const SAVE_DELAY_MS = 1500;
 
 export const EMPTY_DRAWING = JSON.stringify({
   type: "excalidraw",
@@ -37,13 +36,15 @@ interface Props {
   theme: Theme;
   /** Bumped after a successful Google re-auth so pending saves can retry. */
   authEpoch: number;
+  /** Wait this long after the last edit before saving. */
+  saveDelayMs: number;
   onStatus: (s: SaveStatus) => void;
   onAuthExpired: () => void;
   onError: (msg: string) => void;
 }
 
 /** One instance per open drawing (parent keys it by file id). */
-export function Editor({ provider, node, theme, authEpoch, onStatus, onAuthExpired, onError }: Props) {
+export function Editor({ provider, node, theme, authEpoch, saveDelayMs, onStatus, onAuthExpired, onError }: Props) {
   const [initialData, setInitialData] = useState<any>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -117,9 +118,9 @@ export function Editor({ provider, node, theme, authEpoch, onStatus, onAuthExpir
       dirty.current = true;
       cb.current.onStatus("unsaved");
       window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(flush, SAVE_DELAY_MS);
+      timer.current = window.setTimeout(flush, saveDelayMs);
     },
-    [flush],
+    [flush, saveDelayMs],
   );
 
   // Save immediately when switching files / unmounting.
@@ -145,11 +146,22 @@ export function Editor({ provider, node, theme, authEpoch, onStatus, onAuthExpir
         e.preventDefault();
       }
     };
+    // Installed apps and phones often never fire beforeunload, so also save when the app is hidden.
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") void flush();
+    };
+    const onSaveNow = () => void flush();
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("visibilitychange", onHidden);
+    window.addEventListener("pagehide", onSaveNow);
+    window.addEventListener(SAVE_NOW_EVENT, onSaveNow);
     return () => {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("visibilitychange", onHidden);
+      window.removeEventListener("pagehide", onSaveNow);
+      window.removeEventListener(SAVE_NOW_EVENT, onSaveNow);
     };
   }, [flush]);
 

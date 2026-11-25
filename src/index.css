@@ -104,7 +104,8 @@
 
 /* Radix animations (subset of tw-animate-css) */
 @keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
-@keyframes zoom-in { from { opacity: 0; transform: translate(-50%, -48%) scale(0.96) } to { opacity: 1; transform: translate(-50%, -50%) scale(1) } }
+/* Only opacity + scale here: centering uses Tailwind v4's `translate` property, so animating `transform: translate()` would double the offset. */
+@keyframes zoom-in { from { opacity: 0; transform: scale(0.96) } to { opacity: 1; transform: scale(1) } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.96) } to { opacity: 1; transform: scale(1) } }
 .animate-overlay[data-state="open"] { animation: fade-in 150ms ease-out; }
 .animate-dialog[data-state="open"] { animation: zoom-in 150ms ease-out; }

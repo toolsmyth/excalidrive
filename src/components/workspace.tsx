@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Check,
+  Download,
+  Timer,
   ChevronRight,
   CloudOff,
   FilePlus2,
@@ -14,6 +16,7 @@ import {
   PenTool,
   Plus,
   RefreshCw,
+  Sparkles,
   Sun,
   UploadCloud,
 } from "lucide-react";
@@ -30,12 +33,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ConfirmDialog, NameDialog } from "@/components/dialogs";
 import { EMPTY_DRAWING, Editor, type SaveStatus } from "@/components/editor";
 import { FileTree, type TreeActions } from "@/components/file-tree";
+import { APP_VERSION, WhatsNewDialog, shouldAutoShowWhatsNew } from "@/components/whats-new";
 import { cn } from "@/lib/utils";
 import { requestGoogleToken } from "@/lib/storage/google-auth";
 import { GoogleDriveProvider } from "@/lib/storage/google-drive";
 import { countLocalDrawings, syncLocalTo } from "@/lib/storage/local";
 import { AuthExpiredError, sortNodes, type FsNode, type NodeKind, type StorageProvider } from "@/lib/storage/types";
 import type { Theme } from "@/hooks/use-theme";
+import { useInstallPrompt } from "@/hooks/use-install-prompt";
+import { SAVE_DELAYS, requestSaveNow, useSaveDelay } from "@/hooks/use-save-delay";
 
 type DialogState =
   | { type: "create"; kind: NodeKind; parentId: string }
@@ -68,6 +74,9 @@ export function Workspace({
   const [authEpoch, setAuthEpoch] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const toastTimer = useRef<number | undefined>(undefined);
+  const [saveDelay, setSaveDelay] = useSaveDelay();
+  const install = useInstallPrompt();
+  const [whatsNewOpen, setWhatsNewOpen] = useState(shouldAutoShowWhatsNew);
   const [localCount, setLocalCount] = useState(() => (provider.kind === "google" ? countLocalDrawings() : 0));
   const [syncDone, setSyncDone] = useState<number | null>(null);
 
@@ -262,7 +271,15 @@ export function Workspace({
           <div className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <PenTool className="size-3.5" />
           </div>
-          <span className="flex-1 font-semibold tracking-tight">Excalidrive</span>
+          <span className="font-semibold tracking-tight">Excalidrive</span>
+          <button
+            onClick={() => setWhatsNewOpen(true)}
+            className="rounded-full border px-1.5 py-px text-[10px] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground cursor-pointer"
+            title="What's new"
+          >
+            v{APP_VERSION}
+          </button>
+          <span className="flex-1" />
           <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -343,6 +360,10 @@ export function Workspace({
               <DropdownMenuItem onSelect={() => void loadChildren(root)}>
                 <RefreshCw /> Refresh
               </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setWhatsNewOpen(true)}>
+                <Sparkles /> What's new
+                <span className="ml-auto text-xs text-muted-foreground">v{APP_VERSION}</span>
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={onSignOut}>
                 {provider.kind === "google" ? <LogOut /> : <UploadCloud />} {provider.kind === "google" ? "Disconnect Drive" : "Connect Google Drive to sync"}
               </DropdownMenuItem>
@@ -383,6 +404,22 @@ export function Workspace({
             )}
           </nav>
           {active && <SaveIndicator status={status} />}
+          {active && (status === "unsaved" || status === "error") && (
+            <Button size="sm" variant="outline" className="h-7" onClick={requestSaveNow}>
+              Save now
+            </Button>
+          )}
+          <SaveDelayMenu value={saveDelay} onChange={setSaveDelay} />
+          {install.canInstall && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" onClick={install.install} aria-label="Install app">
+                  <Download />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Install app</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon-sm" onClick={onToggleTheme} aria-label="Toggle theme">
@@ -426,6 +463,7 @@ export function Workspace({
               node={active}
               theme={theme}
               authEpoch={authEpoch}
+              saveDelayMs={saveDelay}
               onStatus={setStatus}
               onAuthExpired={() => setAuthExpired(true)}
               onError={showError}
@@ -478,6 +516,7 @@ export function Workspace({
           if (dialog?.type === "rename") await doRename(dialog.node, name);
         }}
       />
+      <WhatsNewDialog open={whatsNewOpen} onOpenChange={setWhatsNewOpen} />
       <ConfirmDialog
         open={dialog?.type === "delete"}
         title={`Delete “${dialog?.type === "delete" ? dialog.node.name : ""}”?`}
@@ -504,6 +543,39 @@ export function Workspace({
         </div>
       )}
     </div>
+  );
+}
+
+function SaveDelayMenu({ value, onChange }: { value: number; onChange: (ms: number) => void }) {
+  const current = SAVE_DELAYS.find((d) => d.ms === value) ?? SAVE_DELAYS[0];
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs text-muted-foreground" aria-label={`Autosave delay: ${current.label}`}>
+              <Timer className="size-3.5" />
+              {current.short}
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Autosave delay</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Save after you stop drawing for</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {SAVE_DELAYS.map((d) => (
+          <DropdownMenuItem key={d.ms} onSelect={() => onChange(d.ms)}>
+            <Check className={cn("size-4", d.ms === value ? "opacity-100" : "opacity-0")} />
+            {d.label}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+          Always saves when you press ⌘/Ctrl+S, switch files, or leave the app.
+        </DropdownMenuLabel>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
